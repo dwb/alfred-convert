@@ -21,7 +21,6 @@ from workflow import Workflow, web
 
 from config import (CURRENCY_CACHE_NAME,
                     CURRENCY_CACHE_AGE,
-                    REFERENCE_CURRENCY,
                     CURRENCIES,
                     YAHOO_BASE_URL,
                     SYMBOLS_PER_REQUEST)
@@ -29,7 +28,7 @@ from config import (CURRENCY_CACHE_NAME,
 
 log = None
 
-parse_yahoo_response = re.compile(r'{}(.+)=X'.format(REFERENCE_CURRENCY)).match
+parse_yahoo_response = re.compile(r'(.{3})(.{3})=X').match
 
 
 def grouper(n, iterable, fillvalue=None):
@@ -60,15 +59,9 @@ def load_yahoo_rates(symbols):
     count = len(symbols)
 
     # Build URL
-    parts = []
-    for symbol in symbols:
-        if symbol == REFERENCE_CURRENCY:
-            count -= 1
-            continue
-        parts.append('{}{}=X'.format(REFERENCE_CURRENCY, symbol))
-
-    query = ','.join(parts)
-    url = YAHOO_BASE_URL.format(query)
+    url = YAHOO_BASE_URL.format(
+        ','.join('{}{}=X'.format(c1, c2) for c1, c2 in symbols)
+    )
 
     # Fetch data
     # log.debug('Fetching {} ...'.format(url))
@@ -89,7 +82,7 @@ def load_yahoo_rates(symbols):
             log.error('Invalid currency : {}'.format(name))
             ycount += 1
             continue
-        symbol = m.group(1)
+        symbols = m.group(1, 2)
         rate = float(rate)
 
         if rate == 0:  # Yahoo! returns 0.0 as rate for unsupported currencies
@@ -97,7 +90,9 @@ def load_yahoo_rates(symbols):
             ycount += 1
             continue
 
-        rates[symbol] = rate
+        rates[symbols] = rate
+        rates[tuple(reversed(symbols))] = 1.0 / rate
+
         ycount += 1
 
     assert ycount == count, 'Yahoo! returned {} results, not {}'.format(
@@ -115,11 +110,17 @@ def fetch_currency_rates():
 
     rates = {}
 
-    for symbols in grouper(SYMBOLS_PER_REQUEST, CURRENCIES.keys()):
+    rate_pairs = [(c1, c2)
+                  for (i, c1) in enumerate(CURRENCIES.iterkeys())
+                  for (j, c2) in enumerate(CURRENCIES.iterkeys())
+                  if j < i]
+
+    for symbols in grouper(SYMBOLS_PER_REQUEST, rate_pairs):
         symbols = [s for s in symbols if s]
         d = load_yahoo_rates(symbols)
         rates.update(d)
 
+    log.debug("new rates: {!r}".format(rates))
     return rates
 
 
@@ -127,14 +128,10 @@ def main(wf):
 
     log.debug('Fetching exchange rates from Yahoo! ...')
 
-    exchange_rates = wf.cached_data(CURRENCY_CACHE_NAME,
-                                    fetch_currency_rates,
-                                    CURRENCY_CACHE_AGE)
+    wf.cached_data(CURRENCY_CACHE_NAME, fetch_currency_rates,
+                   CURRENCY_CACHE_AGE)
 
     log.debug('Exchange rates updated.')
-
-    for currency, rate in exchange_rates.items():
-        wf.logger.debug('1 EUR = {0} {1}'.format(rate, currency))
 
 
 if __name__ == '__main__':

@@ -17,6 +17,7 @@ Usage:
     info.py --openunits
     info.py --currencies [<query>]
     info.py --places <query>
+    info.py --defaultcurrency <query>
 
 Options:
     -h, --help    Show this message
@@ -24,6 +25,7 @@ Options:
     --openunits   Open custom units file in default editor
     --currencies  View/search supported currencies
     --places      Set decimal places
+    --defaultcurrency    Set default currency
 
 """
 
@@ -43,7 +45,8 @@ from config import (ICON_CURRENCY,
                     CURRENCY_CACHE_NAME,
                     CUSTOM_DEFINITIONS_FILENAME,
                     CURRENCIES,
-                    DECIMAL_PLACES_DEFAULT)
+                    DECIMAL_PLACES_DEFAULT,
+                    DEFAULT_SETTINGS)
 
 log = None
 
@@ -115,6 +118,15 @@ def main(wf):
         # subprocess.call(['osascript', '-e', ALFRED_AS])
         return 0
 
+    if args.get('--defaultcurrency'):
+        value = query.upper()
+        if value == "NONE":
+            value = None
+        log.debug('Setting `default_currency` to {!r}'.format(value))
+        wf.settings['default_currency'] = value
+        print('Set default currency to {}'.format(value))
+        return 0
+
     if not query or not query.strip():
         wf.add_item('View Help File',
                     'Open help file in your browser',
@@ -131,8 +143,15 @@ def main(wf):
                     '(current : {})'.format(wf.settings.get(
                                             'decimal_places',
                                             DECIMAL_PLACES_DEFAULT))),
-                    'View and search list of supported currencies',
+                    'Set the precision of conversion results',
                     autocomplete=' places {} '.format(DELIMITER),
+                    icon=ICON_SETTINGS)
+
+        wf.add_item(('Default Currency '
+                    '(current : {})'.format(wf.settings.get(
+                        'default_currency', None))),
+                    'If no target currency is given, default to this',
+                    autocomplete=' currency {} '.format(DELIMITER),
                     icon=ICON_SETTINGS)
 
         wf.add_item('Edit Custom Units',
@@ -200,6 +219,38 @@ def main(wf):
                             'Current number is {}'.format(
                                 wf.settings.get('decimal_places',
                                                 DECIMAL_PLACES_DEFAULT)),
+                            icon=ICON_INFO)
+
+            wf.send_feedback()
+
+        elif mode == 'currency':
+
+            if query:
+                query = query.upper()
+                if query == "NONE":
+                    wf.add_item('Remove default currency',
+                                'Hit `ENTER` to save',
+                                valid=True,
+                                arg='--defaultcurrency {}'.format(query),
+                                icon=ICON_SETTINGS)
+                elif query in CURRENCIES:
+                    wf.add_item('Set default currency to : {}'.format(query),
+                                'Hit `ENTER` to save',
+                                valid=True,
+                                arg='--defaultcurrency {}'.format(query),
+                                icon=ICON_SETTINGS)
+                else:
+                    wf.add_item('Currency not found : {}'.format(query),
+                                'Please enter a known currency',
+                                icon=ICON_WARNING)
+            else:
+                current_default = wf.settings.get(
+                    'default_currency',
+                    DEFAULT_SETTINGS['default_currency'])
+                wf.add_item('Enter a currency (or "none") for conversions to default to',
+                            'Current  is {}'.format(current_default)
+                            if current_default
+                            else "No current default currency",
                             icon=ICON_INFO)
 
             wf.send_feedback()

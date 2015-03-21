@@ -32,10 +32,10 @@ log = None
 
 # Pint objects
 ureg = UnitRegistry()
-Q = ureg.Quantity
 
 
-def convert(query, decimal_places=2):
+def convert(query, decimal_places=2, exchange_rates=None,
+            default_currency=None):
     """Parse query, calculate and return conversion result
 
     Raises a `ValueError` if the query is not understood or is invalid (e.g.
@@ -48,7 +48,9 @@ def convert(query, decimal_places=2):
 
     """
 
-    global log, ureg, Q
+    if exchange_rates is None:
+        exchange_rates = {}
+
     # Parse number from start of query
     qty = []
     for c in query:
@@ -70,39 +72,64 @@ def convert(query, decimal_places=2):
     from_unit = to_unit = None
     # Try splitting tail at every space until we arrive at a pair
     # of units that `pint` understands
-    if len(atoms) == 1:
-        raise ValueError('No destination unit specified')
-    q1 = q2 = ''
-    for i in range(len(atoms)):
-        from_unit = to_unit = None  # reset so no old values spill over
+    conv = 0.0
+    units = ""
+    for i in xrange(len(atoms)):
+        i += 1  # otherwise q1 will always be "" on i = 0
         q1 = ' '.join(atoms[:i]).strip()
         q2 = ' '.join(atoms[i:]).strip()
         log.debug('atoms : %r  i : %d  q1 : %s  q2 : %s', atoms, i, q1, q2)
-        if not len(q1) or not len(q2):  # an empty unit
+        if not q1 and not q2:
             continue
+
+        # Currency exchange
+        rate = None
+        c1, c2 = q1.upper(), q2.upper()
         try:
-            from_unit = Q(qty, q1)
-            to_unit = Q(1, q2)
+            if default_currency and not c2:
+                rate = exchange_rates[(c1, default_currency)]
+                units = default_currency
+            elif q2:
+                rate = exchange_rates[(c1, c2)]
+                units = c2
+        except KeyError:
+            pass
+
+        if rate:
+            conv = qty * rate
+            break
+
+        # Pint unit conversion
+        from_unit = to_unit = None
+        try:
+            from_unit = getattr(ureg, q1)
+            if q2:
+                to_unit = getattr(ureg, q2)
         except UndefinedUnitError:  # Didn't make sense; try again
             continue
-        log.debug("from '%s' to '%s'", from_unit.units, to_unit.units)
+
+        log.debug("from '%s' to '%s'", from_unit, to_unit)
+
+        qty_q = qty * from_unit
+        if to_unit:
+            qty_q = qty_q.to(to_unit)
+        conv, units = qty_q.magnitude, str(qty_q.units)
+
         break  # Got something!
-    # Throw error if we arrive here with no units
-    if from_unit is None:
-        raise ValueError('Unknown unit : %s' % q1)
-    if to_unit is None:
-        raise ValueError('Unknown unit : %s' % q2)
-    conv = from_unit.to(to_unit)
-    log.debug('%f %s' % (conv.magnitude, conv.units))
+
+    else:
+        raise ValueError("Not enough units recognised")
+
+    if not conv:
+        raise ValueError("Conversion failed. File a bug please.")
+
+    log.debug("converted: {!r} {!r}".format(conv, units))
 
     fmt = '%%0.%df %%s' % decimal_places
-    result = fmt % (conv.magnitude, conv.units)
-
-    return result
+    return fmt % (conv, units)
 
 
 def main(wf):
-    global ureg, Q
     # thread = None
     if not len(wf.args):
         return 1
@@ -130,12 +157,6 @@ def main(wf):
     # Load cached data
     exchange_rates = wf.cached_data(CURRENCY_CACHE_NAME, max_age=0)
 
-    if exchange_rates:  # Add exchange rates to conversion database
-        ureg.define('euro = [currency] = eur = EUR')
-        for abbr, rate in exchange_rates.items():
-            ureg.define('{0} = eur / {1} = {2}'.format(abbr, rate,
-                                                       abbr.lower()))
-
     if not wf.cached_data_fresh(CURRENCY_CACHE_NAME, CURRENCY_CACHE_AGE):
         # Update currency rates
         cmd = ['/usr/bin/python', wf.workflowfile('currency.py')]
@@ -155,8 +176,11 @@ def main(wf):
 
     try:
         conversion = convert(query,
-                             decimal_places=wf.settings.get('decimal_places',
-                                                            2))
+                             decimal_places=wf.settings.get(
+                                 'decimal_places', 2),
+                             exchange_rates=exchange_rates,
+                             default_currency=wf.settings.get(
+                                 'default_currency', None))
     except UndefinedUnitError as err:
         log.critical('Unknown unit : %s', err.unit_names)
         error = 'Unknown unit : {}'.format(err.unit_names)

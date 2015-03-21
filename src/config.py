@@ -18,7 +18,7 @@ import json
 import os
 
 CURRENCY_CACHE_AGE = 3600 * 12  # 12 hours
-CURRENCY_CACHE_NAME = 'exchange_rates'
+CURRENCY_CACHE_NAME = 'exchange_rates_full'
 
 DECIMAL_PLACES_DEFAULT = 2
 
@@ -44,4 +44,5 @@ SYMBOLS_PER_REQUEST = 50
 
 UPDATE_SETTINGS = {'github_slug': 'deanishe/alfred-convert'}
 
-DEFAULT_SETTINGS = {'decimal_places': DECIMAL_PLACES_DEFAULT}
+DEFAULT_SETTINGS = {'decimal_places': DECIMAL_PLACES_DEFAULT,
+                    'default_currency': None}
